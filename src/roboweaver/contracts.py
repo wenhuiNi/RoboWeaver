@@ -125,6 +125,7 @@ class ActionRecord(Contract):
     idempotency_key: str
     status: ActionStatus = ActionStatus.QUEUED
     execution_id: str | None = None
+    execution_observation_id: str | None = None
     submitted_at: float | None = None
     finished_at: float | None = None
     stop_requested_at: float | None = None
@@ -153,3 +154,35 @@ class VerificationResult(Contract):
     observed_at: float
     reason: str
     source: str
+
+
+class RunState(Contract):
+    run_id: str
+    stream_id: str
+    task: TaskSpec
+    observation: Observation
+    capabilities: list[ActionContract]
+    created_at: float
+    capacity: int = Field(default=4, ge=1, le=32)
+    plan_version: int = 1
+    next_sequence: int = 1
+    closed: bool = False
+    frozen: bool = False
+    status: TaskStatus = TaskStatus.READY
+    actions: list[ActionRecord] = Field(default_factory=list)
+    verifications: list[VerificationResult] = Field(default_factory=list)
+    binding: dict[str, str] = Field(default_factory=dict)
+    model_calls: int = 0
+    api_retries: int = 0
+    invalid_proposals: int = 0
+    replans: int = 0
+    observation_count: int = 1
+    reason: str | None = None
+
+
+class ExecutionSnapshot(Contract):
+    execution_id: str
+    idempotency_key: str
+    status: ActionStatus
+    stopped: bool
+    last_event: ExecutionEvent | None = None
