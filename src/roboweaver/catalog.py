@@ -1,0 +1,25 @@
+"""Robot-declared action groups; declarations do not register executable tools."""
+
+ACTION_GROUPS = (
+    "Reach / Approach",
+    "Lift",
+    "Move / Transport",
+    "Release",
+    "Grasp / Pick",
+    "Place / Put",
+    "Extract / Retrieve",
+    "Push",
+    "Pull / Drag",
+    "Reorient / Rotate / Flip",
+    "Stack",
+    "Destack",
+    "Regrasp",
+    "Sweep / Clear / Rearrange",
+    "Constrained Insert / Stow",
+    "Open / Close",
+    "Slide",
+    "Press / Toggle",
+    "Screw / Twist",
+    "Pour / Scoop / Wipe",
+    "Hang / Hit",
+)

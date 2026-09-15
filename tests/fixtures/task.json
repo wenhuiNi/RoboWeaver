@@ -1,0 +1,1 @@
+{"task_type":"synthetic_state","goal":"Set flag to true","parameters":{"expected_state":{"flag":true}},"required_capabilities":["set_flag"],"verifier":"roboweaver.verification:state_goal"}

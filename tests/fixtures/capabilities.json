@@ -1,0 +1,5 @@
+[
+ {"action_type":"set_flag","description":"Synthetic fixture: set a boolean flag","parameters":{"type":"object","properties":{"value":{"type":"boolean"}},"required":["value"],"additionalProperties":false},"resources":["fixture_arm"],"supports_cancel":true,"completion_description":"Fixture state updated"},
+ {"action_type":"open","group":"Open / Close","description":"Synthetic open fixture","parameters":{"type":"object","properties":{"target":{"type":"string"}},"required":["target"],"additionalProperties":false},"resources":["fixture_arm"],"supports_cancel":true,"completion_description":"Fixture open event"},
+ {"action_type":"close","group":"Open / Close","description":"Synthetic close fixture","parameters":{"type":"object","properties":{"target":{"type":"string"}},"required":["target"],"additionalProperties":false},"resources":["fixture_arm"],"supports_cancel":true,"completion_description":"Fixture close event"}
+]
