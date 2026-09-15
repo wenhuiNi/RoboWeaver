@@ -105,8 +105,7 @@ async def test_i07_completion_is_not_task_success(tmp_path, state):
 async def test_i11_model_errors_do_not_dispatch(tmp_path, response):
     runtime, executor, clock = await make_runtime(tmp_path, [response])
     try:
-        with pytest.raises((ValueError, TimeoutError)):
-            await runtime.start()
+        await runtime.start()
         assert executor.starts == 0
         assert runtime.state.status == "FAILED"
     finally:

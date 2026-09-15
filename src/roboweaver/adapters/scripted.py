@@ -28,6 +28,10 @@ class ScriptedModel(BaseLlm):
             raise RuntimeError("Scripted model response budget exhausted")
         item = self.responses.pop(0)
         if "error" in item:
+            if item["error"] == "rate_limit":
+                from roboweaver.agent.model import RetryableModelError
+
+                raise RetryableModelError("Synthetic rate limit")
             raise TimeoutError("Synthetic model timeout")
         context = {}
         for content in llm_request.contents:

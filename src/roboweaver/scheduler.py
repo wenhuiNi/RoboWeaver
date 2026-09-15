@@ -1,5 +1,6 @@
 """Bounded serial action streams with durable intent and execution reconciliation."""
 
+import asyncio
 import json
 import sqlite3
 import time
@@ -78,6 +79,7 @@ class Scheduler:
                         proposal=proposal,
                         resources=contract.resources,
                         idempotency_key=action_id,
+                        timeout_seconds=state.task.budget.action_seconds,
                     )
                 )
                 state.next_sequence += 1
@@ -134,7 +136,8 @@ class Scheduler:
             state.status = TaskStatus.EXECUTING
             self.ledger.log(db, run_id, "submit_intent", action.model_dump(mode="json"))
         try:
-            snapshot = await self.executor.submit(action)
+            async with asyncio.timeout(state.task.budget.io_seconds):
+                snapshot = await self.executor.submit(action)
         except (ConnectionError, TimeoutError):
             self._unknown(run_id, action.action_id)
             return None
@@ -176,7 +179,8 @@ class Scheduler:
             if action.status in TERMINAL or action.status == ActionStatus.QUEUED:
                 continue
             try:
-                snapshot = await self.executor.lookup(action.idempotency_key)
+                async with asyncio.timeout(self.ledger.read(run_id).task.budget.io_seconds):
+                    snapshot = await self.executor.lookup(action.idempotency_key)
                 if snapshot is None:
                     self._unknown(run_id, action.action_id)
                 else:
@@ -232,19 +236,30 @@ class Scheduler:
     async def request_stop(self, run_id, reason="cancel"):
         with self.ledger.transaction(run_id) as (db, state):
             state.frozen = True
+            state.stop_intent = reason
             for action in state.actions:
                 if action.status == ActionStatus.QUEUED:
                     action.status = ActionStatus.INVALIDATED
                 elif action.status not in TERMINAL:
                     action.status = ActionStatus.STOPPING
-                    action.stop_requested_at = self.clock()
+                    if action.stop_requested_at is None:
+                        action.stop_requested_at = self.clock()
                     action.stop_reason = reason
             self.ledger.log(db, run_id, "stop_requested", {"reason": reason})
         for action in self.ledger.read(run_id).actions:
             if action.status != ActionStatus.STOPPING:
                 continue
             try:
-                snapshot = await self.executor.cancel(action.idempotency_key)
+                contract = next(
+                    c
+                    for c in self.ledger.read(run_id).capabilities
+                    if c.action_type == action.proposal.action_type
+                )
+                if not contract.supports_cancel:
+                    self._unknown(run_id, action.action_id)
+                    continue
+                async with asyncio.timeout(self.ledger.read(run_id).task.budget.io_seconds):
+                    snapshot = await self.executor.cancel(action.idempotency_key)
                 self._accept_snapshot(run_id, action.action_id, snapshot)
             except (ConnectionError, TimeoutError, ValueError):
                 self._unknown(run_id, action.action_id)
@@ -263,6 +278,7 @@ class Scheduler:
             state.plan_version += 1
             state.next_sequence = 1
             state.closed = state.frozen = False
+            state.stop_intent = None
             state.observation = observation
             state.status = TaskStatus.READY
             self.ledger.log(db, run_id, "stream_revised", {"plan_version": state.plan_version})
@@ -322,3 +338,37 @@ class Scheduler:
                 raise ValueError("Observation moved backwards")
             state.observation = observation
             self.ledger.log(db, run_id, "observation", observation.model_dump(mode="json"))
+
+    async def tick(self, run_id):
+        state = self.ledger.read(run_id)
+        if state.status in {TaskStatus.SUCCEEDED, TaskStatus.CANCELED, TaskStatus.FAILED}:
+            return state
+        active = [
+            a for a in state.actions if a.status not in TERMINAL and a.status != ActionStatus.QUEUED
+        ]
+        total_expired = self.clock() - state.created_at >= state.task.budget.total_seconds
+        action_expired = any(
+            a.submitted_at is not None and self.clock() - a.submitted_at >= a.timeout_seconds
+            for a in active
+        )
+        if not state.stop_intent and (total_expired or action_expired):
+            await self.request_stop(run_id, "timeout")
+        await self.reconcile(run_id)
+        with self.ledger.transaction(run_id) as (db, state):
+            for action in state.actions:
+                if (
+                    action.status not in TERMINAL
+                    and action.stop_requested_at is not None
+                    and self.clock() - action.stop_requested_at >= state.task.budget.stop_seconds
+                ):
+                    action.status = ActionStatus.EXECUTION_UNKNOWN
+                    state.status = TaskStatus.BLOCKED
+            if state.stop_intent and all(a.status in TERMINAL for a in state.actions):
+                state.status = (
+                    TaskStatus.CANCELED
+                    if state.stop_intent == "cancel"
+                    else TaskStatus.RECOVERING
+                    if state.stop_intent == "replan"
+                    else TaskStatus.FAILED
+                )
+        return self.ledger.read(run_id)

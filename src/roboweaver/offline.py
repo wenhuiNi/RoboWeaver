@@ -60,3 +60,15 @@ async def run_mock(task_path, capabilities_path, scenario_path, directory, until
         return export_result(runtime, executor, directory)
     finally:
         await runtime.aclose()
+
+
+async def cancel_mock(directory):
+    directory = Path(directory)
+    meta = json.loads((directory / "run.json").read_text())
+    executor = MockExecutor(directory / "executor.db")
+    scheduler = Scheduler(Ledger(directory / "ledger.db"), executor)
+    state = scheduler.ledger.read(meta["run_id"])
+    if state.status not in {"SUCCEEDED", "CANCELED", "FAILED"}:
+        await scheduler.request_stop(state.run_id, "cancel")
+        state = await scheduler.tick(state.run_id)
+    return {"mode": "mock", "run_id": state.run_id, "status": state.status}

@@ -26,14 +26,22 @@ def main(argv: list[str] | None = None) -> int:
         "inspect", help="Read persisted run state without executing actions"
     )
     inspect.add_argument("--workdir", type=Path, required=True)
+    cancel = commands.add_parser("cancel", help="Request stop and report confirmed execution state")
+    cancel.add_argument("--workdir", type=Path, required=True)
     args = parser.parse_args(argv)
     if args.command == "catalog":
         from roboweaver.catalog import ACTION_GROUPS
 
         print(json.dumps({"declared_groups": ACTION_GROUPS, "execution_verified": False}))
         return 0
-    if args.command in {"run", "inspect"}:
+    if args.command in {"run", "inspect", "cancel"}:
         try:
+            if args.command == "cancel":
+                from roboweaver.offline import cancel_mock
+
+                result = asyncio.run(cancel_mock(args.workdir))
+                print(json.dumps(result))
+                return 0 if result["status"] in {"CANCELED", "SUCCEEDED", "FAILED"} else 1
             if args.command == "run":
                 from roboweaver.offline import run_mock
 

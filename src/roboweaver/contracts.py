@@ -56,6 +56,8 @@ class Budget(Contract):
     max_api_retries: int = Field(default=2, ge=0)
     max_invalid_proposals: int = Field(default=2, ge=0)
     total_seconds: float = Field(default=300, gt=0)
+    model_seconds: float = Field(default=20, gt=0)
+    io_seconds: float = Field(default=5, gt=0)
     action_seconds: float = Field(default=30, gt=0)
     stop_seconds: float = Field(default=5, gt=0)
     observation_max_age: float = Field(default=5, gt=0)
@@ -123,6 +125,7 @@ class ActionRecord(Contract):
     proposal: ActionProposal
     resources: list[str]
     idempotency_key: str
+    timeout_seconds: float = Field(default=30, gt=0)
     status: ActionStatus = ActionStatus.QUEUED
     execution_id: str | None = None
     execution_observation_id: str | None = None
@@ -177,6 +180,7 @@ class RunState(Contract):
     invalid_proposals: int = 0
     replans: int = 0
     observation_count: int = 1
+    stop_intent: str | None = None
     reason: str | None = None
 
 
