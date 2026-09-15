@@ -22,3 +22,23 @@ The planned implementation uses Google ADK for the upper-level agent, with separ
 - **Replaceable adapters** — model providers and robot transports stay outside the core task contract.
 
 An atomic action is an independently scheduled and tracked execution unit. Its granularity is defined by the execution adapter; continuous control remains in the robot runtime.
+
+## Getting started
+
+Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
+
+```bash
+uv sync --locked
+uv run roboweaver --help
+```
+
+The current CLI validates offline configuration with `roboweaver check --config <file>`.
+An offline configuration contains `{"mode": "mock"}`. Robot execution is being implemented.
+
+## Tests
+
+```bash
+uv run pytest tests/smoke -m smoke -q
+```
+
+Tests run offline by default. Local environments, caches, and test results are excluded from Git.
