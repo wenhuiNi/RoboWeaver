@@ -49,7 +49,7 @@ class Scheduler:
         if version != state.plan_version:
             raise ValueError("Plan version conflict")
 
-    def append(self, run_id, version, proposals: list[ActionProposal]):
+    def append(self, run_id, version, proposals: list[ActionProposal], *, binding=None):
         if not proposals:
             raise ValueError("An append must contain actions")
         with self.ledger.transaction(run_id) as (db, state):
@@ -81,6 +81,8 @@ class Scheduler:
                     )
                 )
                 state.next_sequence += 1
+            if binding is not None:
+                state.binding = {**binding, "action_id": state.actions[-1].action_id}
             self.ledger.log(
                 db, run_id, "actions_accepted", {"plan_version": version, "count": len(proposals)}
             )

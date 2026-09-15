@@ -1,0 +1,28 @@
+{
+  "model_responses": [
+    {
+      "tool": "execute_action",
+      "arguments": {
+        "action_type": "set_flag",
+        "arguments": {
+          "value": true
+        },
+        "observation_id": "$observation_id"
+      }
+    },
+    {
+      "tool": "finish_task"
+    },
+    {
+      "text": "Finished"
+    }
+  ],
+  "outcomes": [
+    {
+      "status": "COMPLETED",
+      "state": {
+        "flag": true
+      }
+    }
+  ]
+}

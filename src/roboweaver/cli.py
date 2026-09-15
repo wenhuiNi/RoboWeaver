@@ -1,6 +1,7 @@
 """Command-line entry points; operational errors have nonzero exit codes."""
 
 import argparse
+import asyncio
 import json
 from pathlib import Path
 
@@ -14,12 +15,46 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("catalog", help="List declared action groups (not execution availability)")
     check = commands.add_parser("check", help="Validate offline runtime configuration")
     check.add_argument("--config", type=Path, required=True)
+    run = commands.add_parser("run", help="Run an explicitly selected synthetic scenario")
+    run.add_argument("--mode", choices=["mock"], required=True)
+    run.add_argument("--task", type=Path, required=True)
+    run.add_argument("--capabilities", type=Path, required=True)
+    run.add_argument("--scenario", type=Path, required=True)
+    run.add_argument("--workdir", type=Path, required=True)
+    run.add_argument("--until-waiting", action="store_true")
+    inspect = commands.add_parser(
+        "inspect", help="Read persisted run state without executing actions"
+    )
+    inspect.add_argument("--workdir", type=Path, required=True)
     args = parser.parse_args(argv)
     if args.command == "catalog":
         from roboweaver.catalog import ACTION_GROUPS
 
         print(json.dumps({"declared_groups": ACTION_GROUPS, "execution_verified": False}))
         return 0
+    if args.command in {"run", "inspect"}:
+        try:
+            if args.command == "run":
+                from roboweaver.offline import run_mock
+
+                result = asyncio.run(
+                    run_mock(
+                        args.task,
+                        args.capabilities,
+                        args.scenario,
+                        args.workdir,
+                        args.until_waiting,
+                    )
+                )
+                print(json.dumps(result))
+                return 0 if result["status"] == "SUCCEEDED" else 1
+            from roboweaver.ledger import Ledger
+
+            meta = json.loads((args.workdir / "run.json").read_text())
+            print(Ledger(args.workdir / "ledger.db").read(meta["run_id"]).model_dump_json())
+            return 0
+        except (OSError, ValueError, RuntimeError, KeyError) as exc:
+            parser.error(str(exc))
     try:
         config = json.loads(args.config.read_text())
         if not isinstance(config, dict) or config.get("mode") != "mock":
