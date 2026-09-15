@@ -16,6 +16,13 @@ roboweaver = "roboweaver.cli:main"
 [dependency-groups]
 dev = ["pytest>=8,<9", "pytest-asyncio>=1,<2", "pytest-socket>=0.7,<1", "ruff>=0.12"]
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/roboweaver"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src/roboweaver/**/*.py", "/src/roboweaver/py.typed", "/tests/**/*.py", "/tests/fixtures/*.json", "/tests/fixtures/pixel.png", "/README.md", "/pyproject.toml", "/uv.lock"]
+exclude = ["**/__pycache__", "**/AGENTS.md", "**/*.local.*", "**/*.private.*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers --disable-socket --allow-unix-socket -m 'not live_api and not live_sim and not live_e2e' --junitxml=.local/test-results/pytest.xml"

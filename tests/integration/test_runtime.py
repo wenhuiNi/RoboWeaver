@@ -39,7 +39,7 @@ async def make_runtime(tmp_path, responses):
     obs.images = [
         Image(
             mime_type="image/png",
-            data_base64=base64.b64encode(b"synthetic-image-transport").decode(),
+            data_base64=base64.b64encode((fixtures / "pixel.png").read_bytes()).decode(),
         )
     ]
     run = scheduler.create(
@@ -56,7 +56,7 @@ async def test_i01_i12_real_adk_wait_feedback_and_multistep(tmp_path):
         assert executor.starts == 1 and runtime.state.model_calls == 1
         request = runtime.model.requests[0]
         assert any(
-            p.inline_data and p.inline_data.data == b"synthetic-image-transport"
+            p.inline_data and p.inline_data.data.startswith(b"\x89PNG\r\n\x1a\n")
             for c in request.contents
             for p in c.parts
         )

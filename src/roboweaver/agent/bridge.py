@@ -57,6 +57,14 @@ class ActionBridge:
         """Explicitly close the action stream and independently verify the overall task goal."""
         runtime = self.runtime
         state = runtime.state
+        if any(
+            a.plan_version == state.plan_version and (a.status != "COMPLETED" or not a.verified)
+            for a in state.actions
+        ):
+            return {
+                "status": "blocked",
+                "reason": "Actions must complete and pass verification before finishing",
+            }
         runtime.scheduler.close(state.run_id, state.plan_version, state.next_sequence - 1)
         await runtime.refresh()
         result = runtime.verify("final")

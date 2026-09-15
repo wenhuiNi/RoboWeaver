@@ -183,3 +183,36 @@ def test_i09_cli_cancel(tmp_path):
     assert result.returncode == 1 and json.loads(result.stdout)["status"] == "EXECUTING"
     result = cli("cancel", "--workdir", str(tmp_path))
     assert result.returncode == 0 and json.loads(result.stdout)["status"] == "CANCELED"
+
+
+async def test_i09_concurrent_resume_and_cancel_during_model_call(tmp_path):
+    import asyncio
+
+    from roboweaver.ledger import RunBusyError
+
+    runtime, executor, clock = await make_runtime(tmp_path, script(True))
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = runtime.model.generate_content_async
+
+    async def blocked(request, stream=False):
+        entered.set()
+        await release.wait()
+        async for response in original(request, stream):
+            yield response
+
+    object.__setattr__(runtime.model, "generate_content_async", blocked)
+    task = asyncio.create_task(runtime.start())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=3)
+        with pytest.raises(RunBusyError):
+            await runtime.resume()
+        await runtime.cancel()
+        release.set()
+        await asyncio.wait_for(task, timeout=3)
+        assert executor.starts == 0 and runtime.state.status == "CANCELED"
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await runtime.aclose()

@@ -9,8 +9,12 @@ from roboweaver.contracts import RunState
 
 
 class Ledger:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, create: bool = True):
         self.path = Path(path)
+        if not create:
+            if not self.path.is_file():
+                raise ValueError("Run ledger does not exist")
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
             db.executescript("""
@@ -74,3 +78,25 @@ class Ledger:
                     (run_id,),
                 )
             ]
+
+    @contextmanager
+    def claim(self, run_id):
+        """One active agent driver per run; the OS releases this lock after a crash."""
+        import fcntl
+        from uuid import UUID
+
+        # IDs become filenames only after validation.
+        filename = f"{UUID(run_id)}.lock"
+        with (self.path.parent / filename).open("a") as lock:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise RunBusyError("Another process is driving this run") from exc
+            try:
+                yield
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+class RunBusyError(RuntimeError):
+    pass

@@ -169,7 +169,7 @@ class Scheduler:
                         if action.stop_requested_at is not None
                         else ActionStatus.RUNNING
                     )
-                if state.status == TaskStatus.BLOCKED:
+                if state.status == TaskStatus.BLOCKED and snapshot.status not in TERMINAL:
                     state.status = TaskStatus.EXECUTING
         if snapshot.last_event:
             self.apply(snapshot.last_event)

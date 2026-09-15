@@ -73,6 +73,30 @@ async def test_i05_duplicate_out_of_order_old_event(rig):
     s.revise(run, 1, await e.observe())
     s.apply(late)
     assert s.ledger.read(run).status == "READY"
+    s.append(run, 2, [proposal(s, run)])
+    await s.dispatch(run)
+    current = s.ledger.read(run).actions[-1]
+    s.apply(event.model_copy(update={"event_id": "old-terminal", "sequence": 21}))
+    with s.ledger.connect() as db:
+        assert db.execute("SELECT owner FROM resources").fetchone()[0] == current.action_id
+    assert s.ledger.read(run).actions[-1].status == "RUNNING"
+
+
+async def test_i09_terminal_report_without_stop_remains_blocked(rig):
+    s, e, c, run = rig
+    s.append(run, 1, [proposal(s, run)])
+    await s.dispatch(run)
+    action = s.ledger.read(run).actions[0]
+    s.apply(e.inject(action.idempotency_key, stopped=False))
+    for _ in range(2):
+        await s.reconcile(run)
+        state = s.ledger.read(run)
+        assert state.status == "BLOCKED"
+        assert state.actions[0].status == "EXECUTION_UNKNOWN"
+        assert await s.dispatch(run) is None
+    with s.ledger.connect() as db:
+        assert db.execute("SELECT owner FROM resources").fetchone()[0] == action.action_id
+    assert e.starts == 1
 
 
 async def test_i06_lost_reply_and_reconcile(rig):

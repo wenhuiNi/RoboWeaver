@@ -72,3 +72,50 @@ async def cancel_mock(directory):
         await scheduler.request_stop(state.run_id, "cancel")
         state = await scheduler.tick(state.run_id)
     return {"mode": "mock", "run_id": state.run_id, "status": state.status}
+
+
+async def resume_mock(directory, until_waiting=False):
+    directory = Path(directory)
+    meta = json.loads((directory / "run.json").read_text())
+    scenario = meta["scenario"]
+    executor = MockExecutor(directory / "executor.db")
+    scheduler = Scheduler(Ledger(directory / "ledger.db"), executor)
+    model = ScriptedModel(responses=[])
+    runtime = Runtime(scheduler, meta["run_id"], model, directory / "sessions.db")
+    try:
+        session = await runtime._session()
+        generated = (
+            sum(
+                bool(
+                    event.content
+                    and event.author == "robot_planner"
+                    and any(p.function_call or p.text for p in event.content.parts or [])
+                )
+                for event in session.events
+            )
+            if session
+            else 0
+        )
+        model.responses = scenario["model_responses"][generated + runtime.state.api_retries :]
+        await runtime.resume()
+        while not until_waiting and runtime.state.status == "EXECUTING":
+            index = executor.starts - 1
+            if index >= len(scenario.get("outcomes", [])):
+                break
+            action = runtime.state.actions[-1]
+            outcome = scenario["outcomes"][index]
+            snapshot = await executor.lookup(action.idempotency_key)
+            if snapshot.last_event and snapshot.stopped:
+                await runtime.resume()
+            else:
+                await runtime.feedback(
+                    executor.inject(
+                        action.idempotency_key,
+                        ActionStatus(outcome.get("status", "COMPLETED")),
+                        stopped=outcome.get("stopped", True),
+                        state=outcome.get("state"),
+                    )
+                )
+        return export_result(runtime, executor, directory)
+    finally:
+        await runtime.aclose()

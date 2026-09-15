@@ -25,7 +25,7 @@ An atomic action is an independently scheduled and tracked execution unit. Its g
 
 ## Getting started
 
-Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
+Requires Linux, Python 3.12, and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync --locked
@@ -45,6 +45,15 @@ uv run roboweaver inspect --workdir .local/demo
 
 Use a fresh working directory for each run. Results and execution events are written there.
 The scenario checks orchestration; its scripted actions do not demonstrate robot or VLA performance.
+
+To pause the synthetic driver after submission, add `--until-waiting` to `run`. Continue or cancel that run with:
+
+```bash
+uv run roboweaver resume --workdir .local/demo
+uv run roboweaver cancel --workdir .local/demo
+```
+
+`resume` reconciles persisted execution before continuing. Unknown execution status blocks further actions until resolved. `inspect` only reads state. CLI runs return `0` on success, `1` when unfinished or unsuccessful, and `2` for invalid input; confirmed cancellation returns `0` from `cancel`.
 
 ## Tests
 

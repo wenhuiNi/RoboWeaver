@@ -28,14 +28,25 @@ def main(argv: list[str] | None = None) -> int:
     inspect.add_argument("--workdir", type=Path, required=True)
     cancel = commands.add_parser("cancel", help="Request stop and report confirmed execution state")
     cancel.add_argument("--workdir", type=Path, required=True)
+    resume = commands.add_parser(
+        "resume", help="Reconcile execution and continue a persisted offline run"
+    )
+    resume.add_argument("--workdir", type=Path, required=True)
+    resume.add_argument("--until-waiting", action="store_true")
     args = parser.parse_args(argv)
     if args.command == "catalog":
         from roboweaver.catalog import ACTION_GROUPS
 
         print(json.dumps({"declared_groups": ACTION_GROUPS, "execution_verified": False}))
         return 0
-    if args.command in {"run", "inspect", "cancel"}:
+    if args.command in {"run", "inspect", "cancel", "resume"}:
         try:
+            if args.command == "resume":
+                from roboweaver.offline import resume_mock
+
+                result = asyncio.run(resume_mock(args.workdir, args.until_waiting))
+                print(json.dumps(result))
+                return 0 if result["status"] == "SUCCEEDED" else 1
             if args.command == "cancel":
                 from roboweaver.offline import cancel_mock
 
@@ -59,7 +70,11 @@ def main(argv: list[str] | None = None) -> int:
             from roboweaver.ledger import Ledger
 
             meta = json.loads((args.workdir / "run.json").read_text())
-            print(Ledger(args.workdir / "ledger.db").read(meta["run_id"]).model_dump_json())
+            print(
+                Ledger(args.workdir / "ledger.db", create=False)
+                .read(meta["run_id"])
+                .model_dump_json()
+            )
             return 0
         except (OSError, ValueError, RuntimeError, KeyError) as exc:
             parser.error(str(exc))

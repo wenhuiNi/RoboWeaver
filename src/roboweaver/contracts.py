@@ -175,6 +175,7 @@ class RunState(Contract):
     actions: list[ActionRecord] = Field(default_factory=list)
     verifications: list[VerificationResult] = Field(default_factory=list)
     binding: dict[str, str] = Field(default_factory=dict)
+    pending_feedback: dict[str, Any] | None = None
     model_calls: int = 0
     api_retries: int = 0
     invalid_proposals: int = 0

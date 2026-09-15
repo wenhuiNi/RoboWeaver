@@ -4,10 +4,12 @@ import asyncio
 import base64
 import json
 import time
+from functools import wraps
 from pathlib import Path
 
 from google.adk.agents import LlmAgent
 from google.adk.apps.app import App, ResumabilityConfig
+from google.adk.events import Event
 from google.adk.runners import Runner
 from google.adk.sessions import DatabaseSessionService
 from google.genai import types
@@ -20,11 +22,28 @@ from roboweaver.scheduler import Scheduler
 from roboweaver.tasks import load_verifier
 
 
+def exclusive(method):
+    @wraps(method)
+    async def wrapped(self, *args, **kwargs):
+        task = asyncio.current_task()
+        if self._owner is task:
+            return await method(self, *args, **kwargs)
+        with self.scheduler.ledger.claim(self.run_id):
+            self._owner = task
+            try:
+                return await method(self, *args, **kwargs)
+            finally:
+                self._owner = None
+
+    return wrapped
+
+
 class Runtime:
     def __init__(
         self, scheduler: Scheduler, run_id: str, model, session_path: Path, clock=time.time
     ):
         self.scheduler, self.run_id, self.model, self.clock = scheduler, run_id, model, clock
+        self._owner = None
         self.session_path = Path(session_path).resolve()
         self.session_path.parent.mkdir(parents=True, exist_ok=True)
         self.sessions = DatabaseSessionService(db_url=f"sqlite+aiosqlite:///{self.session_path}")
@@ -107,6 +126,7 @@ class Runtime:
             )
         return parts
 
+    @exclusive
     async def start(self):
         existing = await self.sessions.get_session(
             app_name="roboweaver", user_id="local", session_id=self.run_id
@@ -119,12 +139,22 @@ class Runtime:
         return await self._run(types.Content(role="user", parts=self._parts()))
 
     async def _drive(self, message=None, invocation_id=None):
+        paused = False
         async for event in self.runner.run_async(
             user_id="local",
             session_id=self.run_id,
             new_message=message,
             invocation_id=invocation_id,
         ):
+            paused = (
+                paused
+                or bool(event.long_running_tool_ids)
+                or any(
+                    response.name == "execute_action"
+                    and response.response.get("status") == "pending"
+                    for response in event.get_function_responses()
+                )
+            )
             with self.scheduler.ledger.transaction(self.run_id) as (db, state):
                 self.scheduler.ledger.log(
                     db,
@@ -138,6 +168,8 @@ class Runtime:
                     },
                 )
 
+        return paused
+
     async def _run(self, message=None, invocation_id=None):
         while True:
             try:
@@ -147,8 +179,16 @@ class Runtime:
                 if remaining <= 0:
                     raise BudgetExceeded("Run time budget exhausted")
                 async with asyncio.timeout(remaining):
-                    await self._drive(message, invocation_id)
+                    paused = await self._drive(message, invocation_id)
                 state = self.state
+                if not paused and "action_id" in state.binding:
+                    session = await self._session()
+                    call_id = state.binding["function_call_id"]
+                    paused = not any(
+                        event.author == "user"
+                        and any(r.id == call_id for r in event.get_function_responses())
+                        for event in session.events
+                    )
                 if "rejection" in state.binding:
                     raise InvalidDecision(
                         state.binding["rejection"],
@@ -164,6 +204,7 @@ class Runtime:
                         TaskStatus.BLOCKED,
                     }
                     and not state.closed
+                    and not paused
                     and not any(a.status not in TERMINAL for a in state.actions)
                 ):
                     raise InvalidDecision("Agent returned without an action or explicit completion")
@@ -236,10 +277,101 @@ class Runtime:
         self.scheduler.revise(self.run_id, self.state.plan_version, self.state.observation)
         return True
 
+    @exclusive
     async def feedback(self, event):
         self.scheduler.apply(event)
         return await self.continue_execution()
 
+    async def _session(self):
+        return await self.sessions.get_session(
+            app_name="roboweaver", user_id="local", session_id=self.run_id
+        )
+
+    @exclusive
+    async def resume(self):
+        state = await self.scheduler.tick(self.run_id)
+        if state.status in {TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.CANCELED}:
+            return state
+        session = await self._session()
+        if session is None:
+            if state.actions:
+                raise ValueError(
+                    "ADK session missing for an existing execution; reconciliation required"
+                )
+            return await self.start()
+        if state.pending_feedback:
+            return await self._deliver_feedback()
+        binding = state.binding
+        if binding:
+            # Crash inside the tool may leave a persisted call without its pending response.
+            has_pending = any(
+                event.author != "user"
+                and any(r.id == binding["function_call_id"] for r in event.get_function_responses())
+                for event in session.events
+            )
+            if not has_pending:
+                if not any(
+                    any(
+                        call.id == binding["function_call_id"]
+                        for call in event.get_function_calls()
+                    )
+                    for event in session.events
+                ):
+                    raise ValueError("Persisted tool binding has no matching ADK call")
+                # The tool's durable intent already exists. Restore its receipt without executing it again.
+                receipt = types.Content(
+                    role="user",
+                    parts=[
+                        types.Part(
+                            function_response=types.FunctionResponse(
+                                id=binding["function_call_id"],
+                                name=binding["tool_name"],
+                                response={
+                                    "status": "pending",
+                                    "action_id": binding.get("action_id"),
+                                },
+                            )
+                        )
+                    ],
+                )
+                await self.sessions.append_event(
+                    session=session,
+                    event=Event(
+                        author="robot_planner",
+                        invocation_id=binding["invocation_id"],
+                        content=receipt,
+                    ),
+                )
+            return await self.continue_execution()
+        if session.events:
+            return await self._run(invocation_id=session.events[-1].invocation_id)
+        return await self._run(types.Content(role="user", parts=self._parts()))
+
+    async def _deliver_feedback(self):
+        pending = self.state.pending_feedback
+        if pending is None:
+            return self.state
+        session = await self._session()
+        if session is None:
+            raise ValueError("ADK session missing for pending feedback")
+        delivered = any(
+            event.author == "user"
+            and any(r.id == pending["call_id"] for r in event.get_function_responses())
+            for event in session.events
+        )
+        message = None if delivered else types.Content.model_validate(pending["message"])
+        result = await self._run(message, pending["invocation_id"])
+        with self.scheduler.ledger.transaction(self.run_id) as (db, state):
+            if state.pending_feedback and state.pending_feedback["call_id"] == pending["call_id"]:
+                state.pending_feedback = None
+                self.scheduler.ledger.log(
+                    db, self.run_id, "feedback_delivered", {"call_id": pending["call_id"]}
+                )
+        if self.state.binding.get("function_call_id") != pending["call_id"]:
+            return await self.continue_execution()
+        return result
+
+    @exclusive
     async def continue_execution(self):
         state = self.state
         if state.status in {
@@ -248,41 +380,53 @@ class Runtime:
             TaskStatus.SUCCEEDED,
         } or state.stop_intent in {"cancel", "timeout", "failure"}:
             return state
-        if not state.binding:
+        if state.pending_feedback:
+            return await self._deliver_feedback()
+        if not state.binding or "action_id" not in state.binding:
             return state
         action = next(a for a in state.actions if a.action_id == state.binding["action_id"])
         if action.status not in TERMINAL:
             return state
         try:
             await self.refresh()
-        except (BudgetExceeded, ConnectionError, TimeoutError) as exc:
-            await self.terminate("failure", str(exc))
-            return self.state
-        if action.status == ActionStatus.COMPLETED and not action.verified:
-            result = self.verify(action.action_id)
-        else:
-            result = None
-        if action.status != ActionStatus.COMPLETED or (result and result.verdict != "PASS"):
-            try:
+            previous = next(
+                (v for v in reversed(self.state.verifications) if v.checkpoint == action.action_id),
+                None,
+            )
+            result = previous
+            if action.status == ActionStatus.COMPLETED and not action.verified:
+                result = self.verify(action.action_id)
+            # A crash after revision must not consume another replan for the old action.
+            if action.plan_version == self.state.plan_version and (
+                action.status != ActionStatus.COMPLETED or (result and result.verdict != "PASS")
+            ):
                 if not await self.recover():
                     return self.state
-            except (BudgetExceeded, ValueError, ConnectionError, TimeoutError) as exc:
-                await self.terminate("failure", str(exc))
-                return self.state
-        binding = self.state.binding.copy()
-        response = types.Part(
-            function_response=types.FunctionResponse(
-                id=binding["function_call_id"],
-                name=binding["tool_name"],
-                response={
-                    "status": action.status,
-                    "verification": result.model_dump(mode="json") if result else None,
-                },
+            binding = self.state.binding.copy()
+            response = types.Part(
+                function_response=types.FunctionResponse(
+                    id=binding["function_call_id"],
+                    name=binding["tool_name"],
+                    response={
+                        "status": action.status,
+                        "verification": result.model_dump(mode="json") if result else None,
+                    },
+                )
             )
-        )
-        return await self._run(
-            types.Content(role="user", parts=[response, *self._parts()]), binding["invocation_id"]
-        )
+            message = types.Content(role="user", parts=[response, *self._parts()])
+            with self.scheduler.ledger.transaction(self.run_id) as (db, state):
+                state.pending_feedback = {
+                    "call_id": binding["function_call_id"],
+                    "invocation_id": binding["invocation_id"],
+                    "message": message.model_dump(mode="json"),
+                }
+                self.scheduler.ledger.log(
+                    db, self.run_id, "feedback_prepared", {"call_id": binding["function_call_id"]}
+                )
+            return await self._deliver_feedback()
+        except (ValueError, RuntimeError, TimeoutError, ConnectionError) as exc:
+            await self.terminate("failure", type(exc).__name__)
+            return self.state
 
     async def aclose(self):
         await self.sessions.close()
