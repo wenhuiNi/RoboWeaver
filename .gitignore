@@ -1,0 +1,150 @@
+# Default deny. Open directories for traversal, then allow public project files.
+# Review this file whenever adding a directory or design document.
+# Add narrow exceptions only for files intended for publication.
+*
+!*/
+
+# Repository metadata and public documentation.
+!/.gitignore
+!/.gitattributes
+!/.editorconfig
+!/README.md
+!/README.*.md
+!/LICENSE
+!/LICENSE.*
+!/NOTICE
+!/CITATION.cff
+!/CONTRIBUTING.md
+!/CODE_OF_CONDUCT.md
+!/SECURITY.md
+!/CHANGELOG.md
+
+# Python packaging, reproducible dependencies, and development tooling.
+!/pyproject.toml
+!/uv.lock
+!/poetry.lock
+!/requirements.txt
+!/requirements-dev.txt
+!/requirements/*.txt
+!/requirements/*.in
+!/.python-version
+!/pytest.ini
+!/ruff.toml
+!/.pre-commit-config.yaml
+!/Makefile
+!/MANIFEST.in
+
+# Application code, tests, examples, and maintained scripts.
+!/src/**/*.py
+!/src/**/*.pyi
+!/src/**/py.typed
+!/tests/**/*.py
+!/examples/**/*.py
+!/examples/**/*.md
+!/scripts/**/*.py
+!/scripts/**/*.sh
+
+# Public schemas and configuration examples. Actual local configs stay ignored.
+!/schemas/**/*.json
+!/configs/examples/**/*.yaml
+!/configs/examples/**/*.yml
+!/configs/examples/**/*.toml
+!/configs/examples/**/*.json
+!/configs/examples/**/*.md
+!/examples/**/*.example.yaml
+!/examples/**/*.example.yml
+!/examples/**/*.example.json
+!/.env.example
+
+# Small synthetic fixtures only; real datasets and run outputs belong in .local/.
+!/tests/fixtures/**/*.json
+!/tests/fixtures/**/*.yaml
+!/tests/fixtures/**/*.yml
+!/tests/fixtures/**/*.toml
+!/tests/fixtures/**/*.txt
+!/tests/fixtures/**/*.png
+!/tests/fixtures/**/*.jpg
+!/tests/fixtures/**/*.jpeg
+
+# Documentation is private by default. Allow public guides/assets by exact path
+# when they are ready; do not allow all Markdown files or the entire docs tree.
+
+# CI and contribution templates.
+!/.github/workflows/**/*.yml
+!/.github/workflows/**/*.yaml
+!/.github/ISSUE_TEMPLATE/**/*.md
+!/.github/ISSUE_TEMPLATE/**/*.yml
+!/.github/pull_request_template.md
+!/.github/dependabot.yml
+!/.github/CODEOWNERS
+
+# These exclusions override all allow rules above, including nested copies.
+AGENTS.md
+/docs/requirements-design.md
+/docs/upper-agent-design.md
+.git/
+.agents/
+.codex/
+.local/
+.venv/
+venv/
+env/
+.idea/
+.vscode/
+.cache/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.tox/
+.nox/
+__pycache__/
+*.egg-info/
+node_modules/
+build/
+dist/
+_build/
+htmlcov/
+site-packages/
+.ipynb_checkpoints/
+
+# External checkouts, models, simulator assets, and generated results.
+/vendor/
+/third_party/
+/external/
+/models/
+/weights/
+/checkpoints/
+/datasets/
+/data/
+/assets/
+/runs/
+/outputs/
+/artifacts/
+/logs/
+/tmp/
+/temp/
+/docs/site/_build/
+
+# Local overrides, credentials, and editor leftovers must never be allowlisted.
+.env
+.env.*
+!/.env.example
+*.local.*
+*.private.*
+*.secret.*
+credentials.json
+credentials.*.json
+service-account*.json
+secrets.json
+secrets.yaml
+secrets.yml
+*.pem
+*.key
+*.p12
+*.pfx
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
